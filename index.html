@@ -2152,12 +2152,21 @@ function openBayarCicilanModal(wargaId, onDone){
 function openBayarLunasModal(wargaId, bulan, onDone){
   const w = DB.warga.find(x=>x.id===wargaId);
   if(!w) return;
-  const belum = DB.tagihan.filter(t=>t.wargaId===wargaId && t.bulan===bulan && t.status==='belum');
-  if(!belum.length){ alert('Semua kategori kas untuk rumah ini sudah lunas bulan ini.'); return; }
+  // Ambil SEMUA tunggakan warga ini di semua bulan (bukan cuma bulan yang sedang dibuka),
+  // supaya kalau warga bayar sekaligus beberapa bulan, admin tinggal 1x klik & centang semua.
+  const semuaBelum = DB.tagihan.filter(t=>t.wargaId===wargaId && t.status==='belum').sort((a,b)=>a.bulan.localeCompare(b.bulan)||a.kategoriId.localeCompare(b.kategoriId));
+  if(!semuaBelum.length){ alert('Semua kategori kas untuk rumah ini sudah lunas.'); return; }
+  const bulanList = [...new Set(semuaBelum.map(t=>t.bulan))];
   showModal(`✅ Tandai Lunas — ${esc(w.kepalaKeluarga)} (${esc(w.blok)} ${esc(w.noRumah)})`, `
-    <p class="small-muted">Centang kategori yang dibayar kali ini (default semua tercentang). Kalau warga cuma bayar sebagian, hilangkan centang kategori yang belum dibayar.</p>
-    <div style="max-height:160px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:12px">
-      ${belum.map(t=>{ const kat=DB.kategori.find(k=>k.id===t.kategoriId); return `<label style="display:flex;justify-content:space-between;gap:8px;text-transform:none;font-size:.85rem;color:var(--ink);margin-bottom:6px"><span><input type="checkbox" class="blCheck" value="${t.id}" checked style="width:auto;margin-right:8px">${esc(kat?kat.nama:'-')}</span><b>${fmtRp(t.nominal)}</b></label>`; }).join('')}
+    <p class="small-muted">Rumah ini punya tunggakan di <b>${bulanList.length} bulan</b> (${bulanList.map(bulanNama).join(', ')}). Semua kategori & bulan sudah tercentang otomatis — kalau warga cuma bayar sebagian, hilangkan centang yang belum dibayar.</p>
+    <div style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:12px">
+      ${bulanList.map(bln=>{
+        const items = semuaBelum.filter(t=>t.bulan===bln);
+        return `<div style="margin-bottom:10px">
+          <div style="font-weight:700;font-size:.8rem;color:var(--primary-dark);margin-bottom:4px">${esc(bulanNama(bln))}</div>
+          ${items.map(t=>{ const kat=DB.kategori.find(k=>k.id===t.kategoriId); return `<label style="display:flex;justify-content:space-between;gap:8px;text-transform:none;font-size:.85rem;color:var(--ink);margin-bottom:6px"><span><input type="checkbox" class="blCheck" value="${t.id}" checked style="width:auto;margin-right:8px">${esc(kat?kat.nama:'-')}</span><b>${fmtRp(t.nominal)}</b></label>`; }).join('')}
+        </div>`;
+      }).join('')}
     </div>
     <div class="form-row">
       <div class="field"><label>Tanggal Bayar</label><input type="date" id="bl_tanggal" value="${new Date().toISOString().slice(0,10)}"></div>
@@ -2179,9 +2188,11 @@ function openBayarLunasModal(wargaId, bulan, onDone){
     if(metode==='transfer' && file){
       bukti = await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(file); });
     }
+    const paidBulanSet = new Set();
     checkedIds.forEach(tid=>{
       const t = DB.tagihan.find(x=>x.id===tid);
       t.status='lunas'; t.tanggalBayar=tanggal; t.metodeBayar=metode; if(bukti) t.buktiTransfer=bukti;
+      paidBulanSet.add(t.bulan);
       syncTagihanToKeuangan(t);
     });
     document.getElementById('bl_saveBtn').textContent = 'Menyimpan...';
@@ -2189,43 +2200,60 @@ function openBayarLunasModal(wargaId, bulan, onDone){
     try{ await save('tagihan'); await save('keuangan'); }
     catch(e){ alert('Gagal menyimpan — mungkin ukuran bukti transfer terlalu besar. Coba foto lebih kecil.'); document.getElementById('bl_saveBtn').disabled=false; document.getElementById('bl_saveBtn').textContent='✅ Simpan & Tandai Lunas'; return; }
     document.getElementById('bl_saveBtn').style.display = 'none';
+    const paidBulanList = [...paidBulanSet].sort();
+    const bulanUntukPesan = paidBulanList.includes(bulan) ? bulan : (paidBulanList[paidBulanList.length-1] || bulan);
     document.getElementById('bl_result').innerHTML = `
-      <div class="badge lunas" style="display:block;padding:10px;text-align:center;margin-bottom:10px;font-size:.85rem">✅ Berhasil ditandai lunas</div>
-      ${w.noHP ? `<a class="btn ochre" style="width:100%;display:block;text-align:center;box-sizing:border-box" target="_blank" href="${waLink(w.noHP, buildTagihanWaMessage(wargaId, bulan))}">📲 Kirim WA Invoice</a>` : '<p class="small-muted">No. HP warga belum diisi, tidak bisa kirim WA.</p>'}
+      <div class="badge lunas" style="display:block;padding:10px;text-align:center;margin-bottom:10px;font-size:.85rem">✅ Berhasil ditandai lunas (${paidBulanList.length} bulan: ${paidBulanList.map(bulanNama).join(', ')})</div>
+      ${w.noHP ? `<a class="btn ochre" style="width:100%;display:block;text-align:center;box-sizing:border-box" target="_blank" href="${waLink(w.noHP, buildTagihanWaMessage(wargaId, bulanUntukPesan, paidBulanList))}">📲 Kirim WA Invoice</a>` : '<p class="small-muted">No. HP warga belum diisi, tidak bisa kirim WA.</p>'}
     `;
     if(onDone) onDone();
   };
 }
 
-function buildTagihanWaMessage(wargaId, bulanView){
+function buildTagihanWaMessage(wargaId, bulanView, paidBulanList){
   const w = DB.warga.find(x=>x.id===wargaId);
   if(!w) return '';
   const lokasi = (w.blok?w.blok+' ':'')+w.noRumah;
   const namaKat = kid => { const k=DB.kategori.find(x=>x.id===kid); return k?k.nama:'Iuran'; };
   const semuaBelum = DB.tagihan.filter(t=>t.wargaId===wargaId && t.status==='belum').sort((a,b)=>a.bulan.localeCompare(b.bulan));
-  const bulanIniRows = DB.tagihan.filter(t=>t.wargaId===wargaId && t.bulan===bulanView);
-  const bulanIniBelum = bulanIniRows.filter(t=>t.status==='belum');
-  const bulanIniLunas = bulanIniRows.filter(t=>t.status==='lunas');
-  const tunggakanLain = semuaBelum.filter(t=>t.bulan!==bulanView);
   const totalTunggakan = semuaBelum.reduce((s,t)=>s+Number(t.nominal||0),0);
   let msg = `Halo *${w.kepalaKeluarga}* (Blok ${lokasi}),\n\n`;
-  if(bulanIniLunas.length){
-    msg += `Terima kasih 🙏 pembayaran iuran Anda untuk *${bulanNama(bulanView)}* sudah kami terima:\n`;
-    bulanIniLunas.forEach(t=> msg += `• ${namaKat(t.kategoriId)}: ${fmtRp(t.nominal)} — LUNAS ✅\n`);
-  } else if(bulanIniRows.length){
-    msg += `Berikut tagihan iuran RT untuk bulan *${bulanNama(bulanView)}*:\n`;
+
+  // Kalau pembayaran ini mencakup lebih dari satu bulan sekaligus (mis. dari tombol
+  // "Bayar Lunas" yang baru saja melunaskan beberapa bulan tunggakan dalam satu proses),
+  // rangkum SEMUA bulan itu di sini, bukan cuma satu bulan.
+  const bulanTerbayar = (paidBulanList && paidBulanList.length) ? [...paidBulanList].sort() : (() => {
+    const r = DB.tagihan.filter(t=>t.wargaId===wargaId && t.bulan===bulanView && t.status==='lunas');
+    return r.length ? [bulanView] : [];
+  })();
+
+  if(bulanTerbayar.length){
+    msg += bulanTerbayar.length>1
+      ? `Terima kasih 🙏 pembayaran iuran Anda untuk *${bulanTerbayar.length} bulan sekaligus* (${bulanTerbayar.map(bulanNama).join(', ')}) sudah kami terima:\n`
+      : `Terima kasih 🙏 pembayaran iuran Anda untuk *${bulanNama(bulanTerbayar[0])}* sudah kami terima:\n`;
+    bulanTerbayar.forEach(bln=>{
+      const rows = DB.tagihan.filter(t=>t.wargaId===wargaId && t.bulan===bln && t.status==='lunas');
+      if(bulanTerbayar.length>1) msg += `${bulanNama(bln)}:\n`;
+      rows.forEach(t=> msg += `• ${namaKat(t.kategoriId)}: ${fmtRp(t.nominal)} — LUNAS ✅\n`);
+    });
+  } else {
+    const bulanIniRows = DB.tagihan.filter(t=>t.wargaId===wargaId && t.bulan===bulanView);
+    if(bulanIniRows.length) msg += `Berikut tagihan iuran RT untuk bulan *${bulanNama(bulanView)}*:\n`;
   }
-  if(bulanIniBelum.length){
+
+  const bulanIniBelum = DB.tagihan.filter(t=>t.wargaId===wargaId && t.bulan===bulanView && t.status==='belum');
+  if(bulanIniBelum.length && !bulanTerbayar.includes(bulanView)){
     msg += `\nUntuk bulan ${bulanNama(bulanView)} masih ada yang belum lunas:\n`;
     bulanIniBelum.forEach(t=> msg += `• ${namaKat(t.kategoriId)}: ${fmtRp(t.nominal)}\n`);
   }
+  const tunggakanLain = semuaBelum.filter(t=>t.bulan!==bulanView);
   if(tunggakanLain.length){
     msg += `\nSelain itu, masih ada tunggakan bulan sebelumnya:\n`;
     tunggakanLain.forEach(t=> msg += `• ${bulanNama(t.bulan)} — ${namaKat(t.kategoriId)}: ${fmtRp(t.nominal)}\n`);
   }
   if(semuaBelum.length){
     msg += `\n*Total keseluruhan tunggakan: ${fmtRp(totalTunggakan)}*\nMohon tetap wajib dilunasi ya. Terima kasih 🙏\n`;
-  } else if(bulanIniLunas.length){
+  } else if(bulanTerbayar.length){
     msg += `\nSemua iuran sudah lunas, tidak ada tunggakan. Terima kasih atas kepatuhannya 🙏\n`;
   }
   msg += `\n_Informasi resmi dari Pengurus ${DB.settings.rtName}_`;
