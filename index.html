@@ -17,7 +17,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://unpkg.com/pizzip@3.1.7/dist/pizzip.min.js"></script>
-<script src="https://unpkg.com/docxtemplater@3.44.0/js/docxtemplater.js"></script>
+<script src="https://unpkg.com/docxtemplater@3.44.0/build/docxtemplater.js"></script>
 <style>
 :root{
   --bg:#F7F5EF;
@@ -3634,7 +3634,8 @@ function adminSettings(el){
   if(removeTplKeuanganBtn) removeTplKeuanganBtn.onclick = () => { pendingTplKeuangan=null; removeTplKeuangan=true; document.getElementById('tplKeuanganStatus').innerHTML = '<span class="small-muted">Template akan dihapus setelah disimpan.</span>'; };
   const removeTplIuranBtn = document.getElementById('removeTplIuranBtn');
   if(removeTplIuranBtn) removeTplIuranBtn.onclick = () => { pendingTplIuran=null; removeTplIuran=true; document.getElementById('tplIuranStatus').innerHTML = '<span class="small-muted">Template akan dihapus setelah disimpan.</span>'; };
-  document.getElementById('s_kopSurat').onchange = async (e) => {
+  const kopSuratInput = document.getElementById('s_kopSurat');
+  if(kopSuratInput) kopSuratInput.onchange = async (e) => {
     const f = e.target.files[0]; if(!f) return;
     pendingKopSurat = await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(f); });
     removeKopSurat = false;
