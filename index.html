@@ -548,7 +548,10 @@ function renderTicker(){
   if(!msgs.length){ bar.style.display='none'; return; }
   bar.style.display='block';
   const text = msgs.join('     •     ') + '     •     ';
-  document.getElementById('tickerTrack').textContent = text + text;
+  const track = document.getElementById('tickerTrack');
+  track.textContent = text + text;
+  const duration = Math.max(35, Math.round(text.length * 0.22));
+  track.style.animationDuration = duration + 's';
 }
 
 function applyBranding(){
