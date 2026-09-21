@@ -530,7 +530,7 @@ function computeAutoTicker(){
   const tunggakan = computeTunggakan();
   if(tunggakan.length>0){
     tunggakan.slice(0,10).forEach(t=>{
-      msgs.push('⚠️ '+t.nama+' ('+t.noRumah+') belum bayar '+t.bulan+' bln — '+fmtRp(t.total));
+      msgs.push('⚠️ '+t.nama+' (Blok '+t.blok+' No.'+t.noRumah+') nunggak '+t.bulan+' bln — '+fmtRp(t.total));
     });
   } else if(DB.tagihan.length) {
     msgs.push('✅ Semua tagihan iuran tercatat lunas, terima kasih warga!');
