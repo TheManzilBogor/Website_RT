@@ -2197,18 +2197,26 @@ function openBayarCicilanModal(wargaId, onDone){
     const metode = document.getElementById('f_cicilanMetode').value;
     if(!tanggal){ alert('Isi tanggal bayar.'); return; }
     const keuanganTouched = [];
+    const paidBulanSet = new Set();
     akanLunas.forEach(t=>{
       t.status = 'lunas';
       t.tanggalBayar = tanggal;
       t.metodeBayar = metode;
       t.keterangan = (t.keterangan?t.keterangan+' | ':'') + 'Dibayar via cicilan/sebagian';
+      paidBulanSet.add(t.bulan);
       const e = syncTagihanToKeuangan(t);
       if(e) keuanganTouched.push(e);
     });
     await save('tagihan', akanLunas);
     await save('keuangan', keuanganTouched);
-    alert(`${akanLunas.length} kategori tagihan berhasil dilunasi.`);
-    closeModal();
+    const paidBulanList = [...paidBulanSet].sort();
+    const bulanUntukPesan = paidBulanList[paidBulanList.length-1];
+    document.getElementById('cicilanPreview').innerHTML = `
+      <div class="badge lunas" style="display:block;padding:10px;text-align:center;margin-bottom:10px;font-size:.85rem">✅ ${akanLunas.length} kategori tagihan (${paidBulanList.length} bulan: ${paidBulanList.map(bulanNama).join(', ')}) berhasil dilunasi.</div>
+      ${w.noHP ? `<a class="btn ochre" style="width:100%;display:block;text-align:center;box-sizing:border-box" target="_blank" href="${waLink(w.noHP, buildTagihanWaMessage(wargaId, bulanUntukPesan, paidBulanList))}">📲 Kirim WA Invoice</a>` : '<p class="small-muted">No. HP warga belum diisi, tidak bisa kirim WA.</p>'}
+    `;
+    document.getElementById('prosesCicilanBtn').style.display = 'none';
+    document.getElementById('f_cicilanNominal').disabled = true;
     if(onDone) onDone();
   };
 }
@@ -2300,21 +2308,26 @@ function buildTagihanWaMessage(wargaId, bulanView, paidBulanList){
       ? `Terima kasih 🙏 pembayaran iuran Anda untuk *${bulanTerbayar.length} bulan sekaligus* (${bulanTerbayar.map(bulanNama).join(', ')}) sudah kami terima:\n`
       : `Terima kasih 🙏 pembayaran iuran Anda untuk *${bulanNama(bulanTerbayar[0])}* sudah kami terima:\n`;
     bulanTerbayar.forEach(bln=>{
-      const rows = DB.tagihan.filter(t=>t.wargaId===wargaId && t.bulan===bln && t.status==='lunas');
-      if(bulanTerbayar.length>1) msg += `${bulanNama(bln)}:\n`;
-      rows.forEach(t=> msg += `• ${namaKat(t.kategoriId)}: ${fmtRp(t.nominal)} — LUNAS ✅\n`);
+      const rowsLunas = DB.tagihan.filter(t=>t.wargaId===wargaId && t.bulan===bln && t.status==='lunas');
+      const rowsBelum = DB.tagihan.filter(t=>t.wargaId===wargaId && t.bulan===bln && t.status==='belum');
+      if(bulanTerbayar.length>1 || rowsBelum.length) msg += `${bulanNama(bln)}:\n`;
+      rowsLunas.forEach(t=> msg += `• ${namaKat(t.kategoriId)}: ${fmtRp(t.nominal)} — LUNAS ✅\n`);
+      // Kalau pembayarannya cicilan/sebagian, bisa saja 1 bulan cuma sebagian kategorinya
+      // yang terbayar — tampilkan sisa kategori yang masih belum lunas di bulan yang sama ini juga,
+      // supaya warga tahu persis apa yang masih kurang, bukan cuma dikira sudah lunas semua.
+      rowsBelum.forEach(t=> msg += `• ${namaKat(t.kategoriId)}: ${fmtRp(t.nominal)} — masih belum lunas ⚠️\n`);
     });
   } else {
     const bulanIniRows = DB.tagihan.filter(t=>t.wargaId===wargaId && t.bulan===bulanView);
     if(bulanIniRows.length) msg += `Berikut tagihan iuran RT untuk bulan *${bulanNama(bulanView)}*:\n`;
+    const bulanIniBelum = bulanIniRows.filter(t=>t.status==='belum');
+    if(bulanIniBelum.length){
+      msg += `\nUntuk bulan ${bulanNama(bulanView)} masih ada yang belum lunas:\n`;
+      bulanIniBelum.forEach(t=> msg += `• ${namaKat(t.kategoriId)}: ${fmtRp(t.nominal)}\n`);
+    }
   }
 
-  const bulanIniBelum = DB.tagihan.filter(t=>t.wargaId===wargaId && t.bulan===bulanView && t.status==='belum');
-  if(bulanIniBelum.length && !bulanTerbayar.includes(bulanView)){
-    msg += `\nUntuk bulan ${bulanNama(bulanView)} masih ada yang belum lunas:\n`;
-    bulanIniBelum.forEach(t=> msg += `• ${namaKat(t.kategoriId)}: ${fmtRp(t.nominal)}\n`);
-  }
-  const tunggakanLain = semuaBelum.filter(t=>t.bulan!==bulanView);
+  const tunggakanLain = semuaBelum.filter(t=>t.bulan!==bulanView && !bulanTerbayar.includes(t.bulan));
   if(tunggakanLain.length){
     msg += `\nSelain itu, masih ada tunggakan bulan sebelumnya:\n`;
     tunggakanLain.forEach(t=> msg += `• ${bulanNama(t.bulan)} — ${namaKat(t.kategoriId)}: ${fmtRp(t.nominal)}\n`);
