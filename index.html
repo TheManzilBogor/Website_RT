@@ -2763,7 +2763,7 @@ function openRapelModal(onDone){
     </div>
     <div class="field"><label>Tanggal Bayar (tanggal transaksi sebenarnya)</label><input type="date" id="rp_tanggal" value="${new Date().toISOString().slice(0,10)}"></div>
     <div class="field"><label>Total Nominal Dibayar (Rp) — kosongkan untuk pakai nominal default tiap kategori × jumlah bulan</label><input type="text" inputmode="numeric" class="input-rupiah" id="rp_total" placeholder="Contoh: 600.000"></div>
-    <p class="small-muted" style="margin-top:-6px">Kalau lebih dari 1 kategori dipilih dan Total Nominal diisi manual, nominal itu akan dibagi rata ke semua kategori × bulan yang dipilih.</p>
+    <p class="small-muted" style="margin-top:-6px">Kalau lebih dari 1 kategori dipilih dan Total Nominal diisi manual, nominal itu akan dibagi proporsional sesuai Nominal Default tiap kategori (bukan rata) — supaya tiap kategori tetap mencerminkan tarif aslinya masing-masing, dengan total tetap sama persis dengan yang Anda isi.</p>
     <div class="field"><label>Keterangan</label><input id="rp_ket" placeholder="Rapel 12 bulan sekaligus"></div>
     <div class="field"><label><input type="checkbox" id="rp_catatKas" checked style="width:auto;display:inline-block;margin-right:6px"> Catat juga sebagai pemasukan di pembukuan Kas RT</label></div>
     <p class="small-muted" style="margin-top:-6px">Matikan kalau ini cuma backfill rekap lama yang pembukuannya sudah Anda catat manual/terpisah (misal lewat Import Rekap Keuangan), supaya tidak dobel.</p>
@@ -2794,9 +2794,23 @@ function openRapelModal(onDone){
     let count = 0;
     const touched = [];
     const keuanganTouched = [];
+    // Kalau Total Nominal diisi manual dan lebih dari 1 kategori dipilih, jangan dibagi RATA
+    // (itu bikin semua kategori kelihatan sama nominalnya walau tarif aslinya beda-beda).
+    // Sebisa mungkin dibagi PROPORSIONAL sesuai Nominal Default masing-masing kategori,
+    // supaya tetap mencerminkan tarif asli tiap kategori — totalnya tetap pas dengan yang diisi.
+    const sumDefaultPerBulan = katIds.reduce((s,kid)=>{ const k=DB.kategori.find(x=>x.id===kid); return s+(k?Number(k.nominalDefault)||0:0); },0);
     katIds.forEach(kategoriId=>{
       const kat = DB.kategori.find(k=>k.id===kategoriId);
-      const perSlotNominal = totalInput ? Math.round(totalInput/totalSlot) : (kat?kat.nominalDefault:0);
+      let perSlotNominal;
+      if(totalInput){
+        if(sumDefaultPerBulan>0 && kat && Number(kat.nominalDefault)>0){
+          perSlotNominal = Math.round((Number(kat.nominalDefault)/sumDefaultPerBulan) * (totalInput/bulanList.length));
+        } else {
+          perSlotNominal = Math.round(totalInput/totalSlot);
+        }
+      } else {
+        perSlotNominal = kat?kat.nominalDefault:0;
+      }
       bulanList.forEach(bulan=>{
         let t = DB.tagihan.find(x=>x.wargaId===wargaId && x.kategoriId===kategoriId && x.bulan===bulan);
         if(!t){ t = {id:uid(), wargaId, kategoriId, bulan}; DB.tagihan.push(t); }
