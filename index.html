@@ -740,7 +740,7 @@ function renderBeranda(app){
       <div class="card stat-icon-card"><div class="stat-icon c-amber">🧒</div><div><div class="stat">${totalAnak}</div><div class="stat-label">Anak-anak</div></div></div>
       <div class="card stat-icon-card"><div class="stat-icon c-teal">⚖️</div><div><div class="stat">${totalL} / ${totalP}</div><div class="stat-label">Laki-laki / Perempuan</div></div></div>
       <div class="card stat-icon-card"><div class="stat-icon ${belum>0?'c-amber':'c-emerald'}">💳</div><div><div class="stat" style="font-size:1.3rem">${lunas} lunas · ${belum} belum</div><div class="stat-label">Status iuran ${bulanNama(bulan)}</div></div></div>
-      <div class="card stat-icon-card"><div class="stat-icon c-emerald">💰</div><div><div class="stat" style="font-size:1.3rem">${fmtRp(totalSaldo)}</div><div class="stat-label">Saldo kas RT</div></div></div>
+      <div class="card stat-icon-card"><div class="stat-icon c-emerald">💰</div><div><div class="stat" style="font-size:1.3rem">${fmtRp(totalSaldo)}</div><div class="stat-label">Saldo Besar Kas Warga The Manzil Bogor</div></div></div>
       <div class="card stat-icon-card"><div class="stat-icon c-amber">⚠️</div><div><div class="stat" style="font-size:1.3rem">${fmtRp(computeTunggakan().reduce((s,t)=>s+t.total,0))}</div><div class="stat-label">Total Tunggakan IPL Warga</div></div></div>
     </div>
     <div class="divider"></div>
