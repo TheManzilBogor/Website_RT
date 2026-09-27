@@ -526,7 +526,7 @@ function computeTunggakan(){
 function computeAutoTicker(){
   const msgs = [];
   const saldo = DB.keuangan.reduce((s,k)=>s+(k.jenis==='masuk'?Number(k.jumlah):-Number(k.jumlah)),0);
-  msgs.push('💰 Saldo Kas RT saat ini: '+fmtRp(saldo));
+  msgs.push('💰 Saldo Besar Kas Warga The Manzil Bogor: '+fmtRp(saldo));
   const tunggakan = computeTunggakan();
   if(tunggakan.length>0){
     tunggakan.forEach(t=>{
@@ -766,6 +766,19 @@ function renderBeranda(app){
         ${renderLatestMadingList()}
       </div>
     </div>
+    <div class="divider"></div>
+    <div class="section-title"><span class="eyebrow">Organisasi</span><h2 style="font-size:1.3rem">Kepengurusan RT</h2></div>
+    <div class="grid cols-3">
+      ${DB.struktur.length ? DB.struktur.map(s=>`
+        <div class="card org-card">
+          ${s.foto ? `<img src="${s.foto}" style="width:76px;height:76px;border-radius:50%;object-fit:cover;margin:0 auto 10px auto;display:block;border:3px solid var(--primary-light)">` : `<div style="width:76px;height:76px;border-radius:50%;background:var(--primary-light);color:var(--primary-dark);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:1.5rem;margin:0 auto 10px auto">${esc((s.nama||'?')[0])}</div>`}
+          <div class="role">${esc(s.jabatan)}</div>
+          <div class="name">${esc(s.nama)}</div>
+          ${s.blok || s.alamat ? `<div class="small-muted" style="margin-top:4px">${esc(s.blok?('Blok '+s.blok+' '):'')}${esc(s.alamat||'')}</div>` : ''}
+          ${s.noHP ? `<a class="btn sm outline" style="margin-top:10px" target="_blank" href="${waLink(s.noHP,'Halo '+s.nama+', ')}">📲 ${esc(s.noHP)}</a>` : ''}
+        </div>
+      `).join('') : '<div class="empty">Struktur pengurus belum diisi.</div>'}
+    </div>
   `;
   document.getElementById('searchTunggakan').addEventListener('input', (e)=>{
     document.getElementById('tunggakanWrap').innerHTML = renderTunggakanTable(e.target.value);
@@ -955,7 +968,7 @@ function renderKeuanganPublic(app){
   app.innerHTML = `
     <div class="section-title"><span class="eyebrow">Transparansi Kas</span><h2>Laporan Keuangan RT</h2></div>
     <div class="card" style="margin-bottom:16px; background:linear-gradient(135deg, var(--primary-dark), var(--primary)); color:#fff; border:none;">
-      <div class="stat-label" style="color:rgba(255,255,255,0.8)">💰 Total Saldo Kas RT Saat Ini (Semua Kategori, Real-time)</div>
+      <div class="stat-label" style="color:rgba(255,255,255,0.8)">💰 Saldo Besar Kas Warga The Manzil Bogor (Semua Kategori, Real-time)</div>
       <div class="stat" style="font-size:2.1rem;color:#fff">${fmtRp(saldoAktual.total)}</div>
       <div class="small-muted" style="color:rgba(255,255,255,0.7);margin-top:4px">Ini saldo keseluruhan terkini, tidak terikat filter bulan di bawah — beda dengan tampilan per bulan yang cuma menunjukkan aktivitas & saldo kumulatif sampai bulan yang dipilih.</div>
     </div>
@@ -1614,10 +1627,14 @@ function renderLogin(app){
       </div>
     </div>
   `;
-  document.getElementById('adminLoginBtn').onclick = () => {
+  const doLogin = () => {
     const v = document.getElementById('adminPassInput').value;
     if(v === DB.settings.adminPass){ isAdmin=true; render(); }
     else document.getElementById('loginError').textContent = 'Kata sandi salah.';
+  };
+  document.getElementById('adminLoginBtn').onclick = doLogin;
+  document.getElementById('adminPassInput').onkeydown = (e) => {
+    if(e.key === 'Enter'){ e.preventDefault(); doLogin(); }
   };
 }
 
