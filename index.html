@@ -509,6 +509,39 @@ function renderCover(){
   else cs.classList.remove('hide');
 }
 
+function fmtRibuanInput(v){
+  const digits = (v||'').toString().replace(/\D/g,'');
+  if(!digits) return '';
+  return Number(digits).toLocaleString('id-ID');
+}
+function parseRibuanInput(v){
+  return Number((v||'').toString().replace(/\D/g,'')) || 0;
+}
+function wireRupiahInput(el){
+  if(!el || el._rupiahWired) return;
+  el._rupiahWired = true;
+  if(el.value) el.value = fmtRibuanInput(el.value);
+  el.addEventListener('input', () => {
+    const fromEnd = el.value.length - el.selectionStart;
+    el.value = fmtRibuanInput(el.value);
+    const pos = Math.max(0, el.value.length - fromEnd);
+    el.setSelectionRange(pos, pos);
+  });
+}
+function wireRupiahInputs(root){
+  (root||document).querySelectorAll('.input-rupiah').forEach(wireRupiahInput);
+}
+function searchMatch(nama, blok, noRumah, q){
+  if(!q) return true;
+  const nq = q.toLowerCase().replace(/\s+/g,'');
+  const b = (blok||'').toString().toLowerCase();
+  const n = (noRumah||'').toString().toLowerCase();
+  const nm = (nama||'').toString().toLowerCase();
+  const combos = [b+n, n+b, b, n, nm.replace(/\s+/g,'')];
+  if(combos.some(c=>c.includes(nq))) return true;
+  const full = (nm+' '+b+' '+n).toLowerCase();
+  return full.includes(q.toLowerCase());
+}
 function computeTunggakan(){
   const map = {};
   DB.tagihan.filter(t=>t.status==='belum').forEach(t=>{
@@ -787,7 +820,7 @@ function renderBeranda(app){
 function renderTunggakanTable(query){
   const q = (query||'').toLowerCase();
   let rows = computeTunggakan();
-  if(q) rows = rows.filter(t=> (t.nama+' '+t.blok+' '+t.noRumah).toLowerCase().includes(q));
+  if(q) rows = rows.filter(t=> searchMatch(t.nama, t.blok, t.noRumah, q));
   if(!rows.length) return `<div class="empty">${q ? 'Tidak ada warga menunggak yang cocok dengan pencarian.' : 'Semua warga sudah lunas iuran, terima kasih 🎉'}</div>`;
   rows = rows.sort((a,b)=>{
     const blokCmp = (a.blok||'').localeCompare(b.blok||'', undefined, {numeric:true, sensitivity:'base'});
@@ -822,7 +855,7 @@ function renderWargaPublic(app){
   `;
   const draw = () => {
     const q = (document.getElementById('searchWarga').value||'').toLowerCase();
-    const rows = sortWarga(DB.warga.filter(w=> (w.noRumah+' '+w.blok+' '+w.kepalaKeluarga).toLowerCase().includes(q)));
+    const rows = sortWarga(DB.warga.filter(w=> searchMatch(w.kepalaKeluarga, w.blok, w.noRumah, q)));
     document.getElementById('wargaTableWrap').innerHTML = rows.length ? `
       <table><thead><tr><th>Kepala Keluarga</th><th>Status Tempat Tinggal</th><th>Blok</th><th>No. Rumah</th><th></th></tr></thead>
       <tbody>${rows.map(w=>`<tr><td>${esc(w.kepalaKeluarga)}</td><td>${esc(w.statusTinggal)||'-'}</td><td>${esc(w.blok)||'-'}</td><td>${esc(w.noRumah)}</td><td><button class="btn sm outline" data-detail="${w.id}">View</button></td></tr>`).join('')}</tbody></table>
@@ -1673,7 +1706,7 @@ function adminWarga(el){
   };
   const draw = () => {
     const q = (document.getElementById('searchWargaAdmin').value||'').toLowerCase();
-    const rows = sortWarga(DB.warga.filter(w=> (w.noRumah+' '+w.blok+' '+w.kepalaKeluarga).toLowerCase().includes(q)));
+    const rows = sortWarga(DB.warga.filter(w=> searchMatch(w.kepalaKeluarga, w.blok, w.noRumah, q)));
     const allChecked = rows.length>0 && rows.every(w=>selected.has(w.id));
     document.getElementById('wargaAdminTableWrap').innerHTML = `
       <table><thead><tr><th style="width:36px"><input type="checkbox" id="selectAllWarga" ${allChecked?'checked':''}></th><th>Blok</th><th>No. Rumah</th><th>Kepala Keluarga</th><th>Status Tinggal</th><th>Status Marital</th><th class="num">KK</th><th class="num">Luar KK</th><th class="num">Anak</th><th class="num">L</th><th class="num">P</th><th>No. HP</th><th></th></tr></thead>
@@ -2095,7 +2128,7 @@ function openKatModal(id){
   const berlaku = k.berlakuUntuk||[];
   showModal(`${id?'Edit':'Tambah'} Kategori Iuran`, `
     <div class="field"><label>Nama Kategori</label><input id="f_nama" value="${esc(k.nama)}" placeholder="Iuran Bulanan / Kebersihan / Keamanan"></div>
-    <div class="field"><label>Nominal Default (Rp)</label><input type="number" id="f_nominal" value="${k.nominalDefault||0}"></div>
+    <div class="field"><label>Nominal Default (Rp)</label><input type="text" inputmode="numeric" class="input-rupiah" id="f_nominal" value="${k.nominalDefault||0}"></div>
     <div class="field">
       <label>Berlaku untuk rumah berstatus tempat tinggal apa saja?</label>
       <p class="small-muted" style="margin-top:-2px;margin-bottom:6px">Kosongkan semua centang = berlaku untuk semua rumah. Contoh: matikan centang "Tidak Ditempati" untuk Kas Sampah supaya rumah kosong tidak ditagih.</p>
@@ -2103,9 +2136,10 @@ function openKatModal(id){
     </div>
     <button class="btn" id="saveKatBtn" style="width:100%">Simpan</button>
   `);
+  wireRupiahInputs();
   document.getElementById('saveKatBtn').onclick = async () => {
     k.nama = document.getElementById('f_nama').value.trim();
-    k.nominalDefault = +document.getElementById('f_nominal').value||0;
+    k.nominalDefault = parseRibuanInput(document.getElementById('f_nominal').value);
     k.berlakuUntuk = Array.from(document.querySelectorAll('.f_berlaku:checked')).map(c=>c.value);
     if(!k.nama){ alert('Nama kategori wajib diisi'); return; }
     if(!id) DB.kategori.push(k);
@@ -2124,14 +2158,15 @@ function openBayarCicilanModal(wargaId, onDone){
   showModal(`Bayar Cicilan / Sebagian — ${esc(w.blok)} / ${esc(w.noRumah)} (${esc(w.kepalaKeluarga)})`, `
     <p class="small-muted">Warga ini menunggak <b>${bulanUnik.length} bulan</b> (${bulanNama(bulanUnik[0])} – ${bulanNama(bulanUnik[bulanUnik.length-1])}), total <b>${fmtRp(totalTunggakan)}</b>.</p>
     <p class="small-muted">Masukkan nominal yang BENAR-BENAR dibayarkan warga sekarang (boleh cuma cukup untuk 1-2 bulan). Sistem otomatis melunasi tagihan dari <b>bulan paling lama menunggak dulu</b> (kategori demi kategori) sampai nominalnya habis — sisanya tetap tercatat belum bayar.</p>
-    <div class="field"><label>Nominal Dibayar Sekarang</label><input type="number" id="f_cicilanNominal" placeholder="Contoh: 240000"></div>
+    <div class="field"><label>Nominal Dibayar Sekarang</label><input type="text" inputmode="numeric" class="input-rupiah" id="f_cicilanNominal" placeholder="Contoh: 240.000"></div>
     <div class="field"><label>Tanggal Bayar</label><input type="date" id="f_cicilanTanggal" value="${new Date().toISOString().slice(0,10)}"></div>
     <div class="field"><label>Metode</label><select id="f_cicilanMetode"><option value="Cash">Cash</option><option value="Transfer">Transfer</option></select></div>
     <div id="cicilanPreview" class="small-muted" style="margin:10px 0"></div>
     <button class="btn" id="prosesCicilanBtn" style="width:100%">Proses Pembayaran</button>
   `);
+  wireRupiahInputs();
   const preview = () => {
-    const nominal = +document.getElementById('f_cicilanNominal').value || 0;
+    const nominal = parseRibuanInput(document.getElementById('f_cicilanNominal').value);
     let sisa = nominal;
     const akanLunas = [];
     for(const t of belum){
@@ -2347,7 +2382,7 @@ function adminTagihan(el){
     const bulan = document.getElementById('tagTahunSel').value + '-' + document.getElementById('tagBulanSel').value;
     window._tagBulan = bulan;
     const q = (document.getElementById('tagSearch').value||'').toLowerCase();
-    const rows = sortWarga(DB.warga.filter(w=> (w.noRumah+' '+w.blok+' '+w.kepalaKeluarga).toLowerCase().includes(q)));
+    const rows = sortWarga(DB.warga.filter(w=> searchMatch(w.kepalaKeluarga, w.blok, w.noRumah, q)));
     const allChecked = rows.length>0 && rows.every(w=>tagSelected.has(w.id));
     document.getElementById('tagihanTableWrap').innerHTML = rows.length ? `
       <div class="toolbar" style="margin-bottom:8px">
@@ -2491,7 +2526,7 @@ function openKelolaTagihanWarga(wargaId, bulan, onDone){
       <table><thead><tr><th>Kategori</th><th class="num">Nominal</th><th>Status</th><th>Tgl. Bayar</th><th></th></tr></thead>
       <tbody>${rows.map(t=>{ const kat = DB.kategori.find(k=>k.id===t.kategoriId); return `<tr>
         <td>${esc(kat?kat.nama:'(kategori dihapus)')}</td>
-        <td class="num"><input type="number" style="max-width:110px;display:inline-block" data-knominal="${t.id}" value="${t.nominal}"></td>
+        <td class="num"><input type="text" inputmode="numeric" class="input-rupiah" style="max-width:110px;display:inline-block" data-knominal="${t.id}" value="${t.nominal}"></td>
         <td><select data-kstatus="${t.id}"><option value="belum" ${t.status==='belum'?'selected':''}>Belum Bayar</option><option value="lunas" ${t.status==='lunas'?'selected':''}>Lunas</option></select></td>
         <td><input type="date" style="max-width:140px" data-ktanggal="${t.id}" value="${t.tanggalBayar||new Date().toISOString().slice(0,10)}"></td>
         <td><button class="btn sm brick" data-kdel="${t.id}">Hapus</button></td>
@@ -2499,6 +2534,7 @@ function openKelolaTagihanWarga(wargaId, bulan, onDone){
       <button class="btn" id="saveKelolaBtn" style="width:100%;margin-top:12px">Simpan Semua</button>
     ` : '<div class="empty">Belum ada tagihan untuk warga ini di bulan tersebut. Generate dulu lewat panel di atas.</div>'}
   `);
+  wireRupiahInputs();
   const waBtn = document.getElementById('kelolaWaBtn');
   if(waBtn) waBtn.onclick = () => window.open(waLink(w.noHP, buildTagihanWaMessage(wargaId, bulan)), '_blank');
   document.querySelectorAll('[data-kdel]').forEach(b=>b.onclick=async()=>{
@@ -2516,7 +2552,7 @@ function openKelolaTagihanWarga(wargaId, bulan, onDone){
   const btn = document.getElementById('saveKelolaBtn');
   if(btn) btn.onclick = async () => {
     rows.forEach(t=>{
-      t.nominal = +document.querySelector(`[data-knominal="${t.id}"]`).value||0;
+      t.nominal = parseRibuanInput(document.querySelector(`[data-knominal="${t.id}"]`).value);
       t.status = document.querySelector(`[data-kstatus="${t.id}"]`).value;
       t.tanggalBayar = document.querySelector(`[data-ktanggal="${t.id}"]`).value;
       syncTagihanToKeuangan(t);
@@ -2697,7 +2733,7 @@ function openRapelModal(onDone){
       <div class="field"><label>Sampai Bulan</label><input type="text" id="rp_sampai" placeholder="2026-12"></div>
     </div>
     <div class="field"><label>Tanggal Bayar (tanggal transaksi sebenarnya)</label><input type="date" id="rp_tanggal" value="${new Date().toISOString().slice(0,10)}"></div>
-    <div class="field"><label>Total Nominal Dibayar (Rp) — kosongkan untuk pakai nominal default tiap kategori × jumlah bulan</label><input type="number" id="rp_total" placeholder="Contoh: 600000"></div>
+    <div class="field"><label>Total Nominal Dibayar (Rp) — kosongkan untuk pakai nominal default tiap kategori × jumlah bulan</label><input type="text" inputmode="numeric" class="input-rupiah" id="rp_total" placeholder="Contoh: 600.000"></div>
     <p class="small-muted" style="margin-top:-6px">Kalau lebih dari 1 kategori dipilih dan Total Nominal diisi manual, nominal itu akan dibagi rata ke semua kategori × bulan yang dipilih.</p>
     <div class="field"><label>Keterangan</label><input id="rp_ket" placeholder="Rapel 12 bulan sekaligus"></div>
     <div class="field"><label><input type="checkbox" id="rp_catatKas" checked style="width:auto;display:inline-block;margin-right:6px"> Catat juga sebagai pemasukan di pembukuan Kas RT</label></div>
@@ -2707,6 +2743,7 @@ function openRapelModal(onDone){
     <div class="divider"></div>
     <p class="small-muted">Punya rekap pembayaran lama dari sebelum pakai website ini (banyak warga sekaligus)? Pakai <a href="#" id="switchToBulkRapel">import rekap rapel massal (CSV)</a> supaya tidak input satu-satu.</p>
   `);
+  wireRupiahInputs();
   document.getElementById('switchToBulkRapel').onclick = (e) => { e.preventDefault(); openImportRapelModal(onDone); };
   document.getElementById('rp_pilihSemua').onchange = (e) => {
     document.querySelectorAll('.rp_katCheck').forEach(c=>c.checked = e.target.checked);
@@ -2717,7 +2754,7 @@ function openRapelModal(onDone){
     const dari = document.getElementById('rp_dari').value.trim();
     const sampai = document.getElementById('rp_sampai').value.trim();
     const tanggal = document.getElementById('rp_tanggal').value;
-    const totalInput = document.getElementById('rp_total').value;
+    const totalInput = parseRibuanInput(document.getElementById('rp_total').value);
     const ket = document.getElementById('rp_ket').value.trim() || 'Dibayar rapel';
     if(!katIds.length){ alert('Pilih minimal satu kategori kas.'); return; }
     if(!/^\d{4}-\d{2}$/.test(dari) || !/^\d{4}-\d{2}$/.test(sampai)){ alert('Format bulan harus YYYY-MM, contoh 2026-01'); return; }
@@ -2728,7 +2765,7 @@ function openRapelModal(onDone){
     let count = 0;
     katIds.forEach(kategoriId=>{
       const kat = DB.kategori.find(k=>k.id===kategoriId);
-      const perSlotNominal = totalInput ? Math.round((+totalInput)/totalSlot) : (kat?kat.nominalDefault:0);
+      const perSlotNominal = totalInput ? Math.round(totalInput/totalSlot) : (kat?kat.nominalDefault:0);
       bulanList.forEach(bulan=>{
         let t = DB.tagihan.find(x=>x.wargaId===wargaId && x.kategoriId===kategoriId && x.bulan===bulan);
         if(!t){ t = {id:uid(), wargaId, kategoriId, bulan}; DB.tagihan.push(t); }
@@ -3005,9 +3042,10 @@ function openTrxModal(id){
     </div>
     <div class="field" id="f_kategoriCustomWrap" style="display:${isCustomKat?'block':'none'}"><label>Nama Kategori Lainnya</label><input id="f_kategoriCustom" value="${isCustomKat?esc(t.kategori):''}" placeholder="Contoh: Kebersihan, Keamanan"></div>
     <div class="field"><label>Keterangan</label><input id="f_ket" value="${esc(t.keterangan)}"></div>
-    <div class="field"><label>Jumlah (Rp)</label><input type="number" id="f_jumlah" value="${t.jumlah}"></div>
+    <div class="field"><label>Jumlah (Rp)</label><input type="text" inputmode="numeric" class="input-rupiah" id="f_jumlah" value="${t.jumlah}"></div>
     <button class="btn" id="saveTrxBtn" style="width:100%">Simpan</button>
   `);
+  wireRupiahInputs();
   document.getElementById('f_kategori').onchange = (e) => {
     document.getElementById('f_kategoriCustomWrap').style.display = e.target.value==='__lainnya__' ? 'block' : 'none';
   };
@@ -3019,7 +3057,7 @@ function openTrxModal(id){
     const katSel = document.getElementById('f_kategori').value;
     t.kategori = katSel==='__lainnya__' ? document.getElementById('f_kategoriCustom').value.trim() : katSel;
     t.keterangan = document.getElementById('f_ket').value.trim();
-    t.jumlah = +document.getElementById('f_jumlah').value||0;
+    t.jumlah = parseRibuanInput(document.getElementById('f_jumlah').value);
     if(!t.kategori){ alert('Kategori wajib diisi'); return; }
     if(!id) DB.keuangan.push(t);
     await save('keuangan'); closeModal(); renderAdmin(document.getElementById('app'));
@@ -3036,13 +3074,14 @@ function openUploadBuktiKeluarModal(onDone){
     <div id="uk_aiStatus" class="small-muted" style="margin-bottom:10px"></div>
     <div class="form-row">
       <div class="field"><label>Tanggal</label><input type="date" id="uk_tanggal" value="${new Date().toISOString().slice(0,10)}"></div>
-      <div class="field"><label>Nominal (Rp)</label><input type="number" id="uk_nominal" placeholder="0"></div>
+      <div class="field"><label>Nominal (Rp)</label><input type="text" inputmode="numeric" class="input-rupiah" id="uk_nominal" placeholder="0"></div>
     </div>
     <div class="field"><label>Kategori</label><select id="uk_kategori">${kategoriOpts.map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join('')}</select></div>
     <div class="field"><label>Keterangan</label><input type="text" id="uk_keterangan" placeholder="Untuk apa pengeluaran ini"></div>
     <button class="btn" id="uk_saveBtn" style="width:100%">✅ Simpan Sebagai Pengeluaran</button>
     <div id="uk_result" style="margin-top:12px"></div>
   `);
+  wireRupiahInputs();
   let buktiBase64 = '';
   document.getElementById('uk_foto').onchange = async (e) => {
     const f = e.target.files[0]; if(!f) return;
@@ -3055,7 +3094,7 @@ function openUploadBuktiKeluarModal(onDone){
         document.getElementById('uk_aiStatus').textContent = '⚠️ AI gagal membaca gambar ini. Isi manual di bawah.';
       } else {
         document.getElementById('uk_aiStatus').innerHTML = `✅ AI membaca: ${r.nominal?fmtRp(r.nominal):'nominal tidak terbaca'}${r.tanggal?(' pada '+r.tanggal):''}${r.deskripsi?(' — '+esc(r.deskripsi)):''}. <b>Cek ulang sebelum simpan.</b>`;
-        if(r.nominal) document.getElementById('uk_nominal').value = r.nominal;
+        if(r.nominal) document.getElementById('uk_nominal').value = fmtRibuanInput(r.nominal);
         if(r.tanggal && /^\d{4}-\d{2}-\d{2}$/.test(r.tanggal)) document.getElementById('uk_tanggal').value = r.tanggal;
         if(r.deskripsi) document.getElementById('uk_keterangan').value = r.deskripsi;
       }
@@ -3063,7 +3102,7 @@ function openUploadBuktiKeluarModal(onDone){
   };
   document.getElementById('uk_saveBtn').onclick = async () => {
     const tanggal = document.getElementById('uk_tanggal').value;
-    const nominal = +document.getElementById('uk_nominal').value || 0;
+    const nominal = parseRibuanInput(document.getElementById('uk_nominal').value);
     const kategori = document.getElementById('uk_kategori').value;
     const keterangan = document.getElementById('uk_keterangan').value.trim();
     if(!tanggal || !nominal){ alert('Isi tanggal dan nominal.'); return; }
