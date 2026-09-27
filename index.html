@@ -2540,14 +2540,18 @@ function openKelolaTagihanWarga(wargaId, bulan, onDone){
     <p class="small-muted">Menandai <b>Lunas</b> di sini otomatis mencatat pemasukan ke pembukuan Kas RT (dan sebaliknya, dihapus lagi kalau dibatalkan) — tidak perlu catat manual dua kali.</p>
     ${w.noHP ? `<button class="btn ochre" id="kelolaWaBtn" style="width:100%;margin-bottom:14px">📲 Kirim WA — Ringkasan Semua Kategori + Tunggakan</button>` : `<p class="small-muted">⚠️ No. HP warga ini belum diisi, tidak bisa kirim WA.</p>`}
     ${rows.length ? `
-      <table><thead><tr><th>Kategori</th><th class="num">Nominal</th><th>Status</th><th>Tgl. Bayar</th><th></th></tr></thead>
-      <tbody>${rows.map(t=>{ const kat = DB.kategori.find(k=>k.id===t.kategoriId); return `<tr>
-        <td>${esc(kat?kat.nama:'(kategori dihapus)')}</td>
-        <td class="num"><input type="text" inputmode="numeric" class="input-rupiah" style="max-width:110px;display:inline-block" data-knominal="${t.id}" value="${t.nominal}"></td>
-        <td><select data-kstatus="${t.id}"><option value="belum" ${t.status==='belum'?'selected':''}>Belum Bayar</option><option value="lunas" ${t.status==='lunas'?'selected':''}>Lunas</option></select></td>
-        <td><input type="date" style="max-width:140px" data-ktanggal="${t.id}" value="${t.tanggalBayar||new Date().toISOString().slice(0,10)}"></td>
-        <td><button class="btn sm brick" data-kdel="${t.id}">Hapus</button></td>
-      </tr>`; }).join('')}</tbody></table>
+      ${rows.map(t=>{ const kat = DB.kategori.find(k=>k.id===t.kategoriId); return `
+      <div style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px">
+        <div style="font-weight:700;font-size:.85rem;color:var(--ink);margin-bottom:10px">${esc(kat?kat.nama:'(kategori dihapus)')}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="field" style="margin-bottom:8px"><label>Nominal (Rp)</label><input type="text" inputmode="numeric" class="input-rupiah" data-knominal="${t.id}" value="${t.nominal}"></div>
+          <div class="field" style="margin-bottom:8px"><label>Status</label><select data-kstatus="${t.id}"><option value="belum" ${t.status==='belum'?'selected':''}>Belum Bayar</option><option value="lunas" ${t.status==='lunas'?'selected':''}>Lunas</option></select></div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end">
+          <div class="field" style="margin-bottom:0;flex:1"><label>Tgl. Bayar</label><input type="date" data-ktanggal="${t.id}" value="${t.tanggalBayar||new Date().toISOString().slice(0,10)}"></div>
+          <button class="btn sm brick" data-kdel="${t.id}" style="margin-bottom:1px">Hapus</button>
+        </div>
+      </div>`; }).join('')}
       <button class="btn" id="saveKelolaBtn" style="width:100%;margin-top:12px">Simpan Semua</button>
     ` : '<div class="empty">Belum ada tagihan untuk warga ini di bulan tersebut. Generate dulu lewat panel di atas.</div>'}
   `);
@@ -2807,8 +2811,14 @@ function openRapelModal(onDone){
     });
     await save('tagihan', touched);
     if(catatKas) await save('keuangan', keuanganTouched);
-    document.getElementById('rapelResult').textContent = `${count} tagihan (${bulanList.length} bulan × ${katIds.length} kategori) berhasil ditandai lunas.`+(catatKas?' Pemasukan Kas RT juga ikut tercatat.':'');
-    setTimeout(()=>{ closeModal(); renderAdmin(document.getElementById('app')); if(onDone) onDone(); }, 1200);
+    const w = DB.warga.find(x=>x.id===wargaId);
+    const bulanUntukPesan = bulanList[bulanList.length-1];
+    document.getElementById('rapelResult').innerHTML = `
+      <div class="badge lunas" style="display:block;padding:10px;text-align:center;margin-bottom:10px;font-size:.85rem">✅ ${count} tagihan (${bulanList.length} bulan × ${katIds.length} kategori) berhasil ditandai lunas.${catatKas?' Pemasukan Kas RT juga ikut tercatat.':''}</div>
+      ${w && w.noHP ? `<a class="btn ochre" style="width:100%;display:block;text-align:center;box-sizing:border-box" target="_blank" href="${waLink(w.noHP, buildTagihanWaMessage(wargaId, bulanUntukPesan, bulanList))}">📲 Kirim WA Invoice</a>` : '<p class="small-muted">No. HP warga belum diisi, tidak bisa kirim WA.</p>'}
+    `;
+    document.getElementById('rapelRunBtn').style.display = 'none';
+    if(onDone) onDone();
   };
 }
 
