@@ -600,7 +600,7 @@ function applyBranding(){
   root.setProperty('--bg', t.bg || '#F7F5EF');
 }
 
-async function save(key){
+async function save(key, rows){
   try{
     if(key==='settings'){
       const r = await supa.from('settings').upsert({ key:'site', value: DB.settings });
@@ -622,8 +622,13 @@ async function save(key){
     }
     const table = TABLE[key];
     const mapper = { kategori:toRowKategori, tagihan:toRowTagihan, keuangan:toRowKeuangan, struktur:toRowStruktur, kegiatan:toRowKegiatan, mading:toRowMading, tatatertib:toRowTataTertib, pengaduan:toRowPengaduan, suratKeluar:toRowSuratKeluar, suratPermintaan:toRowSuratPermintaan }[key];
-    if(DB[key].length){
-      const r = await supa.from(table).upsert(DB[key].map(mapper), {onConflict:'id'});
+    // Kalau `rows` diberikan, hanya baris itu yang dikirim ke database (jauh lebih cepat &
+    // menghindari timeout ketika tabel keseluruhan sudah berisi ribuan baris, misal tagihan
+    // untuk ratusan rumah x banyak bulan x banyak kategori). Kalau tidak diberikan, kirim semua
+    // (dipakai untuk kasus lama / operasi yang memang mengubah keseluruhan tabel).
+    const list = rows !== undefined ? rows : DB[key];
+    if(list.length){
+      const r = await supa.from(table).upsert(list.map(mapper), {onConflict:'id'});
       if(r.error) throw r.error;
     }
   }catch(e){
@@ -1222,9 +1227,11 @@ function syncTagihanToKeuangan(t){
       jumlah: t.nominal||0, sumberTagihanId: t.id
     };
     if(idx>=0) DB.keuangan[idx] = entry; else DB.keuangan.push(entry);
+    return entry;
   } else if(idx>=0){
     if(!isBulanLocked(DB.keuangan[idx].tanggal.slice(0,7))) DB.keuangan.splice(idx,1);
   }
+  return null;
 }
 
 async function downloadStatusIuranPdf(bulan){
@@ -2189,15 +2196,17 @@ function openBayarCicilanModal(wargaId, onDone){
     const tanggal = document.getElementById('f_cicilanTanggal').value;
     const metode = document.getElementById('f_cicilanMetode').value;
     if(!tanggal){ alert('Isi tanggal bayar.'); return; }
+    const keuanganTouched = [];
     akanLunas.forEach(t=>{
       t.status = 'lunas';
       t.tanggalBayar = tanggal;
       t.metodeBayar = metode;
       t.keterangan = (t.keterangan?t.keterangan+' | ':'') + 'Dibayar via cicilan/sebagian';
-      syncTagihanToKeuangan(t);
+      const e = syncTagihanToKeuangan(t);
+      if(e) keuanganTouched.push(e);
     });
-    await save('tagihan');
-    await save('keuangan');
+    await save('tagihan', akanLunas);
+    await save('keuangan', keuanganTouched);
     alert(`${akanLunas.length} kategori tagihan berhasil dilunasi.`);
     closeModal();
     if(onDone) onDone();
@@ -2244,15 +2253,19 @@ function openBayarLunasModal(wargaId, bulan, onDone){
       bukti = await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(file); });
     }
     const paidBulanSet = new Set();
+    const tagihanTouched = [];
+    const keuanganTouched = [];
     checkedIds.forEach(tid=>{
       const t = DB.tagihan.find(x=>x.id===tid);
       t.status='lunas'; t.tanggalBayar=tanggal; t.metodeBayar=metode; if(bukti) t.buktiTransfer=bukti;
       paidBulanSet.add(t.bulan);
-      syncTagihanToKeuangan(t);
+      tagihanTouched.push(t);
+      const e = syncTagihanToKeuangan(t);
+      if(e) keuanganTouched.push(e);
     });
     document.getElementById('bl_saveBtn').textContent = 'Menyimpan...';
     document.getElementById('bl_saveBtn').disabled = true;
-    try{ await save('tagihan'); await save('keuangan'); }
+    try{ await save('tagihan', tagihanTouched); await save('keuangan', keuanganTouched); }
     catch(e){ alert('Gagal menyimpan — mungkin ukuran bukti transfer terlalu besar. Coba foto lebih kecil.'); document.getElementById('bl_saveBtn').disabled=false; document.getElementById('bl_saveBtn').textContent='✅ Simpan & Tandai Lunas'; return; }
     document.getElementById('bl_saveBtn').style.display = 'none';
     const paidBulanList = [...paidBulanSet].sort();
@@ -2317,15 +2330,16 @@ function buildTagihanWaMessage(wargaId, bulanView, paidBulanList){
 
 function generateTagihanForWarga(wargaId, bulan){
   const w = DB.warga.find(x=>x.id===wargaId);
-  if(!w) return {added:0, dilewati:0};
+  if(!w) return {added:0, dilewati:0, newRows:[]};
   let added=0, dilewati=0;
+  const newRows = [];
   DB.kategori.forEach(kat=>{
     const berlaku = kat.berlakuUntuk && kat.berlakuUntuk.length ? kat.berlakuUntuk : null;
     if(berlaku && w.statusTinggal && !berlaku.includes(w.statusTinggal)){ dilewati++; return; }
     const exists = DB.tagihan.find(t=>t.wargaId===wargaId && t.bulan===bulan && t.kategoriId===kat.id);
-    if(!exists){ DB.tagihan.push({id:uid(), wargaId, kategoriId:kat.id, bulan, nominal:kat.nominalDefault||0, status:'belum'}); added++; }
+    if(!exists){ const row = {id:uid(), wargaId, kategoriId:kat.id, bulan, nominal:kat.nominalDefault||0, status:'belum'}; DB.tagihan.push(row); newRows.push(row); added++; }
   });
-  return {added, dilewati};
+  return {added, dilewati, newRows};
 }
 
 function adminTagihan(el){
@@ -2418,7 +2432,7 @@ function adminTagihan(el){
     document.querySelectorAll('[data-cicilan]').forEach(b=>b.onclick=()=>openBayarCicilanModal(b.dataset.cicilan, drawTable));
     document.querySelectorAll('[data-gen1]').forEach(b=>b.onclick=async()=>{
       const r = generateTagihanForWarga(b.dataset.gen1, bulan);
-      await save('tagihan');
+      await save('tagihan', r.newRows);
       alert(`${r.added} tagihan dibuat.`+(r.dilewati?` ${r.dilewati} kategori dilewati karena status rumah tidak sesuai.`:''));
       drawTable();
     });
@@ -2483,6 +2497,7 @@ function adminTagihan(el){
     if(!katIds.length){ alert('Pilih minimal satu kategori kas.'); return; }
     let created=0;
     const skippedLunas = [], skippedStatus = [];
+    const newRows = [];
     katIds.forEach(katId=>{
       const kat = DB.kategori.find(k=>k.id===katId);
       const berlaku = kat && kat.berlakuUntuk && kat.berlakuUntuk.length ? kat.berlakuUntuk : null;
@@ -2493,11 +2508,13 @@ function adminTagihan(el){
           if(existing.status==='lunas') skippedLunas.push({w,kat,t:existing});
           return;
         }
-        DB.tagihan.push({id:uid(), wargaId:w.id, kategoriId:katId, bulan, nominal:kat?kat.nominalDefault:0, status:'belum'});
+        const row = {id:uid(), wargaId:w.id, kategoriId:katId, bulan, nominal:kat?kat.nominalDefault:0, status:'belum'};
+        DB.tagihan.push(row);
+        newRows.push(row);
         created++;
       });
     });
-    await save('tagihan');
+    await save('tagihan', newRows);
     document.getElementById('generateResult').innerHTML = `
       <div class="grid cols-3" style="margin-bottom:12px">
         <div class="card"><div class="stat" style="color:#047857">${created}</div><div class="stat-label">Tagihan baru dibuat</div></div>
@@ -2551,14 +2568,16 @@ function openKelolaTagihanWarga(wargaId, bulan, onDone){
   });
   const btn = document.getElementById('saveKelolaBtn');
   if(btn) btn.onclick = async () => {
+    const keuanganTouched = [];
     rows.forEach(t=>{
       t.nominal = parseRibuanInput(document.querySelector(`[data-knominal="${t.id}"]`).value);
       t.status = document.querySelector(`[data-kstatus="${t.id}"]`).value;
       t.tanggalBayar = document.querySelector(`[data-ktanggal="${t.id}"]`).value;
-      syncTagihanToKeuangan(t);
+      const e = syncTagihanToKeuangan(t);
+      if(e) keuanganTouched.push(e);
     });
-    await save('tagihan');
-    await save('keuangan');
+    await save('tagihan', rows);
+    await save('keuangan', keuanganTouched);
     closeModal();
     if(onDone) onDone();
   };
@@ -2663,15 +2682,19 @@ function openUploadBuktiModal(onDone){
     if(!checkedIds.length){ alert('Pilih minimal satu tagihan.'); return; }
     const tanggal = document.getElementById('ub_tanggal').value;
     if(!tanggal){ alert('Isi tanggal bayar.'); return; }
+    const tagihanTouched = [];
+    const keuanganTouched = [];
     checkedIds.forEach(tid=>{
       const t = DB.tagihan.find(x=>x.id===tid);
       t.status='lunas'; t.tanggalBayar=tanggal; t.metodeBayar='transfer'; if(buktiBase64) t.buktiTransfer=buktiBase64;
       t.keterangan = (t.keterangan?t.keterangan+' | ':'') + 'Dibayar via upload bukti transfer' + (hasAiKey?' (auto-isi AI)':'');
-      syncTagihanToKeuangan(t);
+      tagihanTouched.push(t);
+      const e = syncTagihanToKeuangan(t);
+      if(e) keuanganTouched.push(e);
     });
     document.getElementById('ub_saveBtn').textContent = 'Menyimpan...';
     document.getElementById('ub_saveBtn').disabled = true;
-    try{ await save('tagihan'); await save('keuangan'); }
+    try{ await save('tagihan', tagihanTouched); await save('keuangan', keuanganTouched); }
     catch(e){ alert('Gagal menyimpan — mungkin ukuran foto terlalu besar. Coba foto lebih kecil.'); document.getElementById('ub_saveBtn').disabled=false; document.getElementById('ub_saveBtn').textContent='✅ Simpan & Tandai Lunas'; return; }
     document.getElementById('ub_saveBtn').style.display = 'none';
     document.getElementById('ub_result').innerHTML = `<div class="badge lunas" style="display:block;padding:10px;text-align:center">✅ ${checkedIds.length} tagihan berhasil ditandai lunas</div>`;
@@ -2700,6 +2723,7 @@ function openImportTagihanModal(onDone){
     if(!raw) return;
     const lines = raw.split('\n').map(l=>l.trim()).filter(Boolean);
     let ok=0, gagal=0;
+    const touched = [];
     lines.forEach(line=>{
       const p = line.split(',').map(s=>s.trim());
       const [blok, noRumah, namaKategori, bulan, nominal, status, tanggalBayar, keterangan] = p;
@@ -2712,9 +2736,10 @@ function openImportTagihanModal(onDone){
       t.status = (status||'').toLowerCase()==='lunas' ? 'lunas' : 'belum';
       t.tanggalBayar = tanggalBayar || '';
       t.keterangan = keterangan || '';
+      touched.push(t);
       ok++;
     });
-    await save('tagihan');
+    await save('tagihan', touched);
     document.getElementById('importTagihanResult').textContent = `${ok} baris berhasil diimpor, ${gagal} baris dilewati (rumah/kategori tidak ditemukan).`;
     setTimeout(()=>{ closeModal(); renderAdmin(document.getElementById('app')); if(onDone) onDone(); }, 1200);
   };
@@ -2763,6 +2788,8 @@ function openRapelModal(onDone){
     const totalSlot = bulanList.length * katIds.length;
     const catatKas = document.getElementById('rp_catatKas').checked;
     let count = 0;
+    const touched = [];
+    const keuanganTouched = [];
     katIds.forEach(kategoriId=>{
       const kat = DB.kategori.find(k=>k.id===kategoriId);
       const perSlotNominal = totalInput ? Math.round(totalInput/totalSlot) : (kat?kat.nominalDefault:0);
@@ -2773,12 +2800,13 @@ function openRapelModal(onDone){
         t.status = 'lunas';
         t.tanggalBayar = tanggal;
         t.keterangan = ket + ' ('+bulanNama(dari)+' – '+bulanNama(sampai)+')';
-        if(catatKas) syncTagihanToKeuangan(t);
+        if(catatKas){ const e = syncTagihanToKeuangan(t); if(e) keuanganTouched.push(e); }
+        touched.push(t);
         count++;
       });
     });
-    await save('tagihan');
-    if(catatKas) await save('keuangan');
+    await save('tagihan', touched);
+    if(catatKas) await save('keuangan', keuanganTouched);
     document.getElementById('rapelResult').textContent = `${count} tagihan (${bulanList.length} bulan × ${katIds.length} kategori) berhasil ditandai lunas.`+(catatKas?' Pemasukan Kas RT juga ikut tercatat.':'');
     setTimeout(()=>{ closeModal(); renderAdmin(document.getElementById('app')); if(onDone) onDone(); }, 1200);
   };
@@ -2805,6 +2833,7 @@ function openImportRapelModal(onDone){
     if(!raw) return;
     const lines = raw.split('\n').map(l=>l.trim()).filter(Boolean);
     let ok=0, gagal=0, totalTagihan=0;
+    const touched = [];
     lines.forEach(line=>{
       const p = line.split(',').map(s=>s.trim());
       const [noRumah, namaKategori, dari, sampai, totalNominal, tanggalBayar, keterangan] = p;
@@ -2821,11 +2850,12 @@ function openImportRapelModal(onDone){
         t.status = 'lunas';
         t.tanggalBayar = tanggalBayar || '';
         t.keterangan = keterangan || ('Rapel ('+bulanNama(dari)+' – '+bulanNama(sampai)+')');
+        touched.push(t);
         totalTagihan++;
       });
       ok++;
     });
-    await save('tagihan');
+    await save('tagihan', touched);
     document.getElementById('rpImportResult').textContent = `${ok} baris rekap berhasil diproses (${totalTagihan} tagihan ditandai lunas), ${gagal} baris dilewati (rumah/kategori/format bulan tidak cocok).`;
     setTimeout(()=>{ closeModal(); renderAdmin(document.getElementById('app')); if(onDone) onDone(); }, 1400);
   };
@@ -2970,7 +3000,7 @@ function adminKeuangan(el){
       </tr>`; }).join('') || '<tr><td colspan="6" class="empty">Belum ada transaksi untuk filter ini.</td></tr>'}</tbody></table>
     `;
     el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openTrxModal(b.dataset.edit));
-    el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{ if(confirm('Hapus transaksi ini?')){ DB.keuangan=DB.keuangan.filter(t=>t.id!==b.dataset.del); await deleteRowFromDB('keuangan', b.dataset.del); await save('keuangan'); drawTrx(); }});
+    el.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{ if(confirm('Hapus transaksi ini?')){ DB.keuangan=DB.keuangan.filter(t=>t.id!==b.dataset.del); await deleteRowFromDB('keuangan', b.dataset.del); drawTrx(); }});
   };
   document.getElementById('trxBulanSel').onchange = drawTrx;
   document.getElementById('trxTahunSel').onchange = drawTrx;
@@ -3060,7 +3090,7 @@ function openTrxModal(id){
     t.jumlah = parseRibuanInput(document.getElementById('f_jumlah').value);
     if(!t.kategori){ alert('Kategori wajib diisi'); return; }
     if(!id) DB.keuangan.push(t);
-    await save('keuangan'); closeModal(); renderAdmin(document.getElementById('app'));
+    await save('keuangan', [t]); closeModal(); renderAdmin(document.getElementById('app'));
   };
 }
 
@@ -3111,7 +3141,7 @@ function openUploadBuktiKeluarModal(onDone){
     DB.keuangan.push(trx);
     document.getElementById('uk_saveBtn').textContent = 'Menyimpan...';
     document.getElementById('uk_saveBtn').disabled = true;
-    try{ await save('keuangan'); }
+    try{ await save('keuangan', [trx]); }
     catch(e){ alert('Gagal menyimpan.'); document.getElementById('uk_saveBtn').disabled=false; document.getElementById('uk_saveBtn').textContent='✅ Simpan Sebagai Pengeluaran'; return; }
     document.getElementById('uk_saveBtn').style.display = 'none';
     document.getElementById('uk_result').innerHTML = `<div class="badge belum" style="display:block;padding:10px;text-align:center">✅ Pengeluaran ${fmtRp(nominal)} berhasil dicatat</div>`;
@@ -3140,15 +3170,18 @@ function openImportKeuanganModal(onDone){
     if(!raw) return;
     const lines = raw.split('\n').map(l=>l.trim()).filter(Boolean);
     let ok=0, gagal=0, terkunci=0;
+    const newRows = [];
     lines.forEach(line=>{
       const p = line.split(',').map(s=>s.trim());
       const [tanggal, jenis, kategori, keterangan, jumlah] = p;
       if(!/^\d{4}-\d{2}-\d{2}$/.test(tanggal) || !['masuk','keluar'].includes(jenis) || !kategori){ gagal++; return; }
       if(isBulanLocked(tanggal.slice(0,7))){ terkunci++; return; }
-      DB.keuangan.push({ id:uid(), tanggal, jenis, kategori, keterangan: keterangan||'', jumlah: +jumlah||0 });
+      const row = { id:uid(), tanggal, jenis, kategori, keterangan: keterangan||'', jumlah: +jumlah||0 };
+      DB.keuangan.push(row);
+      newRows.push(row);
       ok++;
     });
-    await save('keuangan');
+    await save('keuangan', newRows);
     document.getElementById('kuImportResult').textContent = `${ok} transaksi berhasil diimpor, ${gagal} baris dilewati (format salah), ${terkunci} baris dilewati (bulan sudah terkunci).`;
     setTimeout(()=>{ closeModal(); renderAdmin(document.getElementById('app')); if(onDone) onDone(); }, 1200);
   };
